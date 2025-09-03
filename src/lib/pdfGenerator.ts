@@ -10,7 +10,8 @@ export const generateLaporanPDF = (
       try {
         if (typeof col === 'function') return String(col(row) ?? '')
         const value = (col as string)
-          .split('.')</p> .reduce((acc: any, k: string) => (acc ? acc[k] : undefined), row)
+          .split('.')
+          .reduce((acc: any, k: string) => (acc ? acc[k] : undefined), row)
         return String(value ?? '')
       } catch {
         return ''
@@ -67,9 +68,6 @@ export const generateLaporanPDF = (
   const win = window.open('', '_blank')
   if (!win) {
     // Pop-up diblokir
-    // Kembali object no-op agar pemanggil tidak error
-    // Pengguna diinstruksikan untuk mengizinkan pop-up.
-    // (UI pemanggil bisa menampilkan toast/alert)
     return {
       save: (_delay = 250) => {
         alert('Pop-up diblokir. Izinkan pop-up untuk export/print laporan.')
@@ -91,11 +89,9 @@ export const generateLaporanPDF = (
           win.print()
         } catch (e) {
           // ignore printing errors (e.g., cross-origin restrictions)
-          // caller can show fallback message
         }
       }, delay)
     },
-    // optional helper to programmatically close the print window
     close: () => {
       try {
         win.close()
