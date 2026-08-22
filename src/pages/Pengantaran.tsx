@@ -11,6 +11,13 @@ import { supabase } from "@/integrations/supabase/client"
 import { useToast } from "@/hooks/use-toast"
 import { generateSuratPengajuanPDF, generateSuratTugasPDF } from "@/lib/pdfGenerator"
 import { TemplateProcessor, TemplateVariables } from "@/lib/templateProcessor"
+import {
+  createFileFromStoredWordTemplate,
+  getActiveStoredWordTemplate,
+  loadStoredWordTemplates,
+  type StoredWordTemplate,
+} from "@/lib/templateStorage"
+import { getErrorMessage, normalizeText, safeFileName } from "@/lib/utils"
 
 interface PickupDelivery {
   id?: string
@@ -23,17 +30,23 @@ interface PickupDelivery {
   kelompok?: string
 }
 
+interface PickupDeliveryView extends PickupDelivery {
+  companies?: { nama?: string; alamat?: string }
+  pkl_periods?: { nama?: string; start_date?: string; end_date?: string }
+  teachers?: { nama?: string }
+}
+
 const Pengantaran = () => {
   const [searchTerm, setSearchTerm] = useState("")
-  const [pengantaran, setPengantaran] = useState<any[]>([])
-  const [companies, setCompanies] = useState<any[]>([])
-  const [periods, setPeriods] = useState<any[]>([])
-  const [teachers, setTeachers] = useState<any[]>([])
+  const [pengantaran, setPengantaran] = useState<PickupDeliveryView[]>([])
+  const [companies, setCompanies] = useState<Array<{ id: string; nama: string }>>([])
+  const [periods, setPeriods] = useState<Array<{ id: string; nama: string; start_date: string; end_date: string }>>([])
+  const [teachers, setTeachers] = useState<Array<{ id: string; nama: string }>>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingItem, setEditingItem] = useState<any | null>(null)
+  const [editingItem, setEditingItem] = useState<PickupDeliveryView | null>(null)
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
-  const [configTemplates, setConfigTemplates] = useState<any[]>([])
+  const [configTemplates, setConfigTemplates] = useState<StoredWordTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const { toast } = useToast()
 
@@ -53,15 +66,7 @@ const Pengantaran = () => {
   }, [])
 
   const loadConfigTemplates = () => {
-    try {
-      const savedTemplates = localStorage.getItem('wordTemplates')
-      if (savedTemplates) {
-        const templates = JSON.parse(savedTemplates)
-        setConfigTemplates(templates)
-      }
-    } catch (error) {
-      console.error('Error loading templates:', error)
-    }
+    setConfigTemplates(loadStoredWordTemplates())
   }
 
   const fetchData = async () => {
@@ -78,10 +83,13 @@ const Pengantaran = () => {
         supabase.from('teachers').select('id, nama')
       ])
 
-      if (deliveryData.data) setPengantaran(deliveryData.data)
-      if (companiesData.data) setCompanies(companiesData.data)
-      if (periodsData.data) setPeriods(periodsData.data)
-      if (teachersData.data) setTeachers(teachersData.data)
+      const failedRequest = [deliveryData, companiesData, periodsData, teachersData].find((result) => result.error)
+      if (failedRequest?.error) throw failedRequest.error
+
+      setPengantaran(deliveryData.data || [])
+      setCompanies(companiesData.data || [])
+      setPeriods(periodsData.data || [])
+      setTeachers(teachersData.data || [])
     } catch (error) {
       console.error('Error fetching data:', error)
     } finally {
@@ -91,6 +99,16 @@ const Pengantaran = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!formData.company_id || !formData.period_id) {
+      toast({
+        title: "Data belum lengkap",
+        description: "Perusahaan dan periode wajib dipilih.",
+        variant: "destructive",
+      })
+      return
+    }
+
     try {
       setLoading(true)
       
@@ -115,10 +133,10 @@ const Pengantaran = () => {
       setEditingItem(null)
       resetForm()
       fetchData()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menyimpan data pengantaran"),
         variant: "destructive"
       })
     } finally {
@@ -126,7 +144,7 @@ const Pengantaran = () => {
     }
   }
 
-  const handleEdit = (item: any) => {
+  const handleEdit = (item: PickupDeliveryView) => {
     setEditingItem(item)
     setFormData({
       company_id: item.company_id || "",
@@ -152,10 +170,10 @@ const Pengantaran = () => {
       if (error) throw error
       toast({ title: "Sukses", description: "Data pengantaran berhasil dihapus" })
       fetchData()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menghapus data pengantaran"),
         variant: "destructive"
       })
     }
@@ -173,23 +191,32 @@ const Pengantaran = () => {
     })
   }
 
-  const getConfigData = (key: string) => {
+  const getConfigData = (...keys: string[]): string => {
     try {
       const saved = localStorage.getItem('configData')
-      if (saved) {
-        const config = JSON.parse(saved)
-        const item = config.find((item: any) => item.label === key)
-        return item?.value || ''
-      }
+      if (!saved) return ''
+
+      const config: unknown = JSON.parse(saved)
+      if (!Array.isArray(config)) return ''
+
+      const normalizedKeys = keys.map(normalizeText)
+      const item = config.find((entry): entry is { label: string; value?: unknown } => {
+        if (!entry || typeof entry !== 'object') return false
+        const candidate = entry as { label?: unknown; value?: unknown }
+        return typeof candidate.label === 'string' && normalizedKeys.includes(normalizeText(candidate.label))
+      })
+
+      return typeof item?.value === 'string' ? item.value : String(item?.value ?? '')
     } catch (error) {
       console.error('Error getting config:', error)
+      return ''
     }
-    return ''
   }
 
-  const generateSuratPengajuan = async (item: any) => {
-    const doc = generateSuratPengajuanPDF(item.companies?.nama, item.companies?.alamat)
-    doc.save(`Surat_Pengajuan_${item.companies?.nama.replace(/\s+/g, '_')}.pdf`)
+  const generateSuratPengajuan = async (item: PickupDeliveryView) => {
+    const companyName = item.companies?.nama || 'Perusahaan'
+    const doc = generateSuratPengajuanPDF(companyName, item.companies?.alamat || '')
+    doc.save(`Surat_Pengajuan_${safeFileName(companyName, 'Perusahaan')}.pdf`)
     
     toast({
       title: "Sukses",
@@ -197,7 +224,12 @@ const Pengantaran = () => {
     })
   }
 
-  const generateFromTemplate = async (item: any) => {
+  const generateFromTemplate = async (item: PickupDeliveryView | null) => {
+    if (!item) {
+      toast({ title: "Data pengantaran tidak tersedia", variant: "destructive" })
+      return
+    }
+
     if (!selectedTemplateId) {
       toast({ title: "Pilih template terlebih dahulu", variant: "destructive" });
       return;
@@ -210,25 +242,19 @@ const Pengantaran = () => {
         return;
       }
 
-      // Convert base64 to File
-      const binaryString = window.atob(template.fileData);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const templateFile = new File([bytes], template.name, { 
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
-      });
+      const templateFile = createFileFromStoredWordTemplate(template)
 
       // Get current student data for this company/period
-      const { data: placements } = await supabase
+      const { data: placements, error: placementsError } = await supabase
         .from('pkl_placements')
         .select(`
           id,
           students (nama, rombel, nis)
         `)
         .eq('company_id', item.company_id)
-        .eq('period_id', item.period_id);
+        .eq('period_id', item.period_id)
+
+      if (placementsError) throw placementsError
 
       const siswaData = placements?.map((placement, index) => ({
         no: index + 1,
@@ -240,7 +266,7 @@ const Pengantaran = () => {
       const variables: TemplateVariables = {
         KOTA: getConfigData('KOTA') || "Sidoarjo",
         TANGGAL: new Date().toISOString(),
-        NOMORSURAT: getConfigData('NOMOR_SURAT') || `001/PKL/${new Date().getFullYear()}`,
+        NOMORSURAT: getConfigData('NOMOR_SURAT', 'NOMOR SURAT PENGAJUAN') || `001/PKL/${new Date().getFullYear()}`,
         NAMAPERUSAHAAN: item.companies?.nama || "",
         ALAMATPERUSAHAAN: item.companies?.alamat || "",
         COL_NO: "No",
@@ -256,7 +282,7 @@ const Pengantaran = () => {
       const url = URL.createObjectURL(processedDoc);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Surat_Pengajuan_PKL_${item.companies?.nama?.replace(/\s+/g, '_') || 'Template'}.docx`;
+      a.download = `Surat_Pengajuan_PKL_${safeFileName(item.companies?.nama, 'Template')}.docx`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -281,9 +307,10 @@ const Pengantaran = () => {
     })
   }
 
+  const normalizedSearchTerm = normalizeText(searchTerm)
   const filteredData = pengantaran.filter(item =>
-    item.companies?.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.kelompok?.toLowerCase().includes(searchTerm.toLowerCase())
+    normalizeText(item.companies?.nama).includes(normalizedSearchTerm) ||
+    normalizeText(item.kelompok).includes(normalizedSearchTerm)
   )
 
   return (
@@ -587,6 +614,7 @@ const Pengantaran = () => {
                                 size="sm"
                                 onClick={() => {
                                   setEditingItem(item);
+                                  setSelectedTemplateId(getActiveStoredWordTemplate(configTemplates)?.id || "");
                                   setTemplateDialogOpen(true);
                                 }}
                                 title="Generate dari Template"

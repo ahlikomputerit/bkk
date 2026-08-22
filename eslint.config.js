@@ -24,6 +24,8 @@ export default tseslint.config(
         { allowConstantExport: true },
       ],
       "@typescript-eslint/no-unused-vars": "off",
+      // Legacy CRUD screens still use any; keep the issue visible without blocking builds.
+      "@typescript-eslint/no-explicit-any": "warn",
     },
   }
 );

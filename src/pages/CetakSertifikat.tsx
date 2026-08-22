@@ -8,13 +8,48 @@ import { supabase } from "@/integrations/supabase/client"
 import { generateSertifikatPDF } from "@/lib/pdfGenerator"
 import { useToast } from "@/hooks/use-toast"
 import { TemplateProcessor } from "@/lib/templateProcessor"
+import { createFileFromStoredWordTemplate, getActiveStoredWordTemplate, type StoredWordTemplate } from "@/lib/templateStorage"
+import { getErrorMessage, normalizeText, safeFileName } from "@/lib/utils"
+
+function getCertificateFormat(): string | null {
+  try {
+    const legacyConfig = localStorage.getItem("pkl-config")
+    if (legacyConfig) {
+      const parsed: unknown = JSON.parse(legacyConfig)
+      const penomoran = parsed && typeof parsed === "object"
+        ? (parsed as { penomoran?: unknown }).penomoran
+        : null
+      const format = penomoran && typeof penomoran === "object"
+        ? (penomoran as { sertifikat_format?: unknown }).sertifikat_format
+        : null
+      if (typeof format === "string" && format.trim()) return format.trim()
+    }
+
+    const configData = localStorage.getItem("configData")
+    const parsedConfig: unknown = configData ? JSON.parse(configData) : []
+    if (Array.isArray(parsedConfig)) {
+      const certificateEntry = parsedConfig.find((entry) => {
+        if (!entry || typeof entry !== "object") return false
+        const label = (entry as { label?: unknown }).label
+        return typeof label === "string" && ["sertifikat", "nomor sertifikat", "format sertifikat"].includes(normalizeText(label))
+      }) as { value?: unknown } | undefined
+      if (typeof certificateEntry?.value === "string" && certificateEntry.value.trim()) {
+        return certificateEntry.value.trim()
+      }
+    }
+  } catch (error) {
+    console.error("Error loading certificate format:", error)
+  }
+
+  return null
+}
 
 const CetakSertifikat = () => {
   const [searchTerm, setSearchTerm] = useState("")
   const [students, setStudents] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('id-ID'))
-  const [config, setConfig] = useState<any>({})
+  const [selectedDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [certificateTemplate, setCertificateTemplate] = useState<StoredWordTemplate | null>(null)
   const [printMode, setPrintMode] = useState<'front' | 'back' | null>(null)
   const { toast } = useToast()
 
@@ -24,14 +59,14 @@ const CetakSertifikat = () => {
   }, [])
 
   const loadConfiguration = () => {
-    try {
-      const storedConfig = localStorage.getItem('pkl-config')
-      if (storedConfig) {
-        setConfig(JSON.parse(storedConfig))
-      }
-    } catch (error) {
-      console.error('Error loading configuration:', error)
-    }
+    const activeTemplate = getActiveStoredWordTemplate()
+    const certificateVariables = ["NAMA_SISWA", "NIS", "ROMBEL", "NOMOR_SERTIFIKAT", "TANGGAL_TERBIT"]
+    const isCertificateTemplate = activeTemplate && (
+      normalizeText(activeTemplate.name).includes("sertifikat") ||
+      activeTemplate.variables.some((variable) => certificateVariables.includes(variable))
+    )
+
+    setCertificateTemplate(isCertificateTemplate ? activeTemplate : null)
   }
 
   const fetchStudents = async () => {
@@ -56,19 +91,18 @@ const CetakSertifikat = () => {
     }
   }
 
+  const normalizedSearchTerm = normalizeText(searchTerm)
   const filteredStudents = students.filter(student =>
-    student.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    student.nis.includes(searchTerm)
+    normalizeText(student.nama).includes(normalizedSearchTerm) ||
+    String(student.nis ?? '').includes(searchTerm.trim())
   )
 
   const generateSertifikat = async (student: any) => {
     const placement = student.pkl_placements?.[0]
     const grade = student.student_grades?.[0]
     
-    // Get certificate number from config
-    const certificateNumber = config.penomoran?.sertifikat_format 
-      ? `${config.penomoran.sertifikat_format}/${new Date().getFullYear()}/${String(Date.now()).slice(-4)}`
-      : `CERT/${new Date().getFullYear()}/${String(Date.now()).slice(-4)}`
+    const certificateFormat = getCertificateFormat() || "CERT"
+    const certificateNumber = `${certificateFormat}/${new Date().getFullYear()}/${String(Date.now()).slice(-4)}`
     
     const studentData = {
       nama: student.nama,
@@ -82,15 +116,9 @@ const CetakSertifikat = () => {
     }
 
     try {
-      // Check if Word template is configured
-      const templateConfig = config.templates?.sertifikat
-      if (templateConfig && templateConfig.file) {
-        // Recreate File object from stored data
-        const templateFile = new File(
-          [Uint8Array.from(atob(templateConfig.file.data), c => c.charCodeAt(0))],
-          templateConfig.file.name,
-          { type: templateConfig.file.type }
-        )
+      // Use a template only when it is explicitly identifiable as a certificate template.
+      if (certificateTemplate) {
+        const templateFile = createFileFromStoredWordTemplate(certificateTemplate)
         
         // Use Word template with certificate-specific variables
         const templateData = {
@@ -120,7 +148,7 @@ const CetakSertifikat = () => {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `Sertifikat_${student.nama.replace(/\s+/g, '_')}.docx`
+        a.download = `Sertifikat_${safeFileName(student.nama, 'Siswa')}.docx`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
@@ -128,27 +156,26 @@ const CetakSertifikat = () => {
       } else {
         // Fallback to PDF
         const doc = generateSertifikatPDF(studentData)
-        doc.save(`Sertifikat_${student.nama.replace(/\s+/g, '_')}.pdf`)
+        doc.save(`Sertifikat_${safeFileName(student.nama, 'Siswa')}.pdf`)
       }
       
       toast({
         title: "Sukses",
         description: `Sertifikat untuk ${student.nama} berhasil di-generate`
       })
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error generating certificate:', error)
       toast({
         title: "Error",
-        description: "Gagal generate sertifikat. Silakan coba lagi.",
+        description: getErrorMessage(error, "Gagal generate sertifikat. Silakan coba lagi."),
         variant: "destructive"
       })
     }
   }
 
   const printAllCertificates = (mode: 'front' | 'back') => {
-    setPrintMode(mode)
-    const studentsToProcess = filteredStudents.length > 0 ? filteredStudents : students
-    
+    const studentsToProcess = searchTerm.trim() ? filteredStudents : students
+
     if (studentsToProcess.length === 0) {
       toast({
         title: "Peringatan",
@@ -158,6 +185,7 @@ const CetakSertifikat = () => {
       return
     }
 
+    setPrintMode(mode)
     toast({
       title: "Memproses...",
       description: `Mencetak ${mode === 'front' ? 'halaman depan' : 'halaman belakang'} untuk ${studentsToProcess.length} sertifikat`
@@ -226,7 +254,7 @@ const CetakSertifikat = () => {
               </Button>
               <div className="flex items-center gap-2 ml-4">
                 <Calendar className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm">Tgl Cetak: {selectedDate}</span>
+                <span className="text-sm">Tgl Cetak: {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('id-ID')}</span>
               </div>
             </div>
           </div>
@@ -305,7 +333,7 @@ const CetakSertifikat = () => {
                                title={!placement ? "Siswa belum ditempatkan PKL" : "Generate sertifikat"}
                              >
                                <Download className="w-4 h-4 mr-2" />
-                               {config.templates?.sertifikat ? 'DOCX' : 'PDF'}
+                               {certificateTemplate ? 'DOCX' : 'PDF'}
                              </Button>
                            </td>
                         </tr>

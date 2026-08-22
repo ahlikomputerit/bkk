@@ -11,6 +11,12 @@ import { useToast } from "@/hooks/use-toast"
 import { generateSuratPengajuanPDF, generateSuratTugasPDF } from "@/lib/pdfGenerator"
 import { supabase } from "@/integrations/supabase/client"
 import { TemplateProcessor } from "@/lib/templateProcessor"
+import {
+  loadStoredWordTemplates,
+  saveWordTemplates,
+  setActiveWordTemplate,
+  type WordTemplate,
+} from "@/lib/templateStorage"
 
 interface ConfigData {
   id?: string
@@ -26,14 +32,6 @@ interface ImageData {
   type: string
   active: boolean
   url?: string
-}
-
-interface WordTemplate {
-  id: string
-  name: string
-  file: File
-  uploadedAt: string
-  variables: string[]
 }
 
 const Konfigurasi = () => {
@@ -201,29 +199,19 @@ const Konfigurasi = () => {
   }
 
   const loadTemplates = () => {
-    // Load from localStorage (templates are stored as ArrayBuffer base64)
-    const saved = localStorage.getItem('wordTemplates')
-    if (saved) {
-      try {
-        const parsedTemplates = JSON.parse(saved)
-        // Convert base64 back to File objects
-        const templatesWithFiles = parsedTemplates.map((template: any) => ({
-          ...template,
-          file: new File([new Uint8Array(atob(template.fileData).split('').map(c => c.charCodeAt(0)))], template.name, {
-            type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          })
-        }))
-        setTemplates(templatesWithFiles)
-      } catch (error) {
-        console.error('Error loading templates:', error)
-        setTemplates([])
-      }
-    }
-    
+    const storedTemplates = loadStoredWordTemplates()
+    const templatesWithFiles = storedTemplates.map((template) => ({
+      ...template,
+      file: new File(
+        [Uint8Array.from(window.atob(template.fileData), (character) => character.charCodeAt(0))],
+        template.name,
+        { type: template.fileType || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+      ),
+    }))
+
+    setTemplates(templatesWithFiles)
     const activeId = localStorage.getItem('activeTemplateId')
-    if (activeId) {
-      setActiveTemplateId(activeId)
-    }
+    setActiveTemplateId(activeId || templatesWithFiles[0]?.id || null)
   }
 
   const handleTemplateUpload = async (file: File) => {
@@ -253,22 +241,12 @@ const Konfigurasi = () => {
       const updatedTemplates = [...templates, newTemplate]
       setTemplates(updatedTemplates)
       
-      // Save to localStorage (convert File to base64)
-      const templatesForStorage = await Promise.all(updatedTemplates.map(async (template) => {
-        const arrayBuffer = await template.file.arrayBuffer()
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-        return {
-          ...template,
-          file: undefined, // Remove file object
-          fileData: base64 // Store as base64
-        }
-      }))
-      localStorage.setItem('wordTemplates', JSON.stringify(templatesForStorage))
+      await saveWordTemplates(updatedTemplates)
       
       // Set as active if it's the first template
       if (updatedTemplates.length === 1) {
         setActiveTemplateId(newTemplate.id)
-        localStorage.setItem('activeTemplateId', newTemplate.id)
+        setActiveWordTemplate(newTemplate.id)
       }
 
       toast({
@@ -288,7 +266,7 @@ const Konfigurasi = () => {
 
   const setActiveTemplate = (templateId: string) => {
     setActiveTemplateId(templateId)
-    localStorage.setItem('activeTemplateId', templateId)
+    setActiveWordTemplate(templateId)
     toast({
       title: "Sukses",
       description: "Template berhasil diaktifkan",
@@ -299,24 +277,14 @@ const Konfigurasi = () => {
     const updatedTemplates = templates.filter(t => t.id !== templateId)
     setTemplates(updatedTemplates)
     
-    // Save to localStorage (convert File to base64)
-    const templatesForStorage = await Promise.all(updatedTemplates.map(async (template) => {
-      const arrayBuffer = await template.file.arrayBuffer()
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)))
-      return {
-        ...template,
-        file: undefined, // Remove file object
-        fileData: base64 // Store as base64
-      }
-    }))
-    localStorage.setItem('wordTemplates', JSON.stringify(templatesForStorage))
-    
+    await saveWordTemplates(updatedTemplates)
+
     if (activeTemplateId === templateId) {
       const newActiveId = updatedTemplates.length > 0 ? updatedTemplates[0].id : null
       setActiveTemplateId(newActiveId)
-      localStorage.setItem('activeTemplateId', newActiveId || '')
+      setActiveWordTemplate(newActiveId)
     }
-    
+
     toast({
       title: "Sukses",
       description: "Template berhasil dihapus",

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/integrations/supabase/client"
 import { Plus, Edit, Trash2 } from "lucide-react"
+import { getErrorMessage } from "@/lib/utils"
 
 interface Company {
   id?: string
@@ -74,6 +75,15 @@ export const CompanyCRUD = ({ onDataChange, editingCompany, onEditCancel }: Comp
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.nama.trim()) {
+      toast({
+        title: "Data belum lengkap",
+        description: "Nama perusahaan wajib diisi.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -100,10 +110,10 @@ export const CompanyCRUD = ({ onDataChange, editingCompany, onEditCancel }: Comp
       setFormData({ nama: "", alamat: "", phone: "", email: "", contact_person: "", kategori: "", kecamatan: "" })
       onDataChange()
       if (onEditCancel) onEditCancel()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menyimpan data perusahaan"),
         variant: "destructive"
       })
     } finally {
@@ -112,7 +122,13 @@ export const CompanyCRUD = ({ onDataChange, editingCompany, onEditCancel }: Comp
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (!nextOpen && editingCompany) onEditCancel?.()
+      }}
+    >
       <DialogTrigger asChild>
         {!editingCompany && (
           <Button>
@@ -245,10 +261,10 @@ export const DeleteCompanyButton = ({ companyId, onDelete }: { companyId: string
       if (error) throw error
       toast({ title: "Sukses", description: "Perusahaan berhasil dihapus" })
       onDelete()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menghapus perusahaan"),
         variant: "destructive"
       })
     }

@@ -1,5 +1,5 @@
 
-import { Home, Settings, Database, FileText, Users, Monitor, GraduationCap, Award, Truck, Calendar, ClipboardList, UserCheck, BarChart3, ChevronRight } from "lucide-react"
+import { Home, Settings, Database, FileText, Users, Monitor, GraduationCap, Award, Truck, Calendar, ClipboardList, UserCheck, BarChart3, ChevronRight, type LucideIcon } from "lucide-react"
 import { NavLink, useLocation } from "react-router-dom"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useState } from "react"
@@ -20,7 +20,18 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
-const menuGroups = [
+interface MenuItem {
+  title: string
+  url: string
+  icon: LucideIcon
+}
+
+interface MenuGroup {
+  label: string
+  items: MenuItem[]
+}
+
+const menuGroups: MenuGroup[] = [
   {
     label: "Dashboard",
     items: [
@@ -89,7 +100,7 @@ export function AppSidebar() {
     }))
   }
 
-  const hasActiveItem = (items: any[]) => {
+  const hasActiveItem = (items: MenuItem[]) => {
     return items.some(item => isActive(item.url))
   }
 

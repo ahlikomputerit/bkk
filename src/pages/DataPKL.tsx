@@ -7,6 +7,7 @@ import { Search, FileText, Building, Edit, Trash2 } from "lucide-react"
 import { supabase } from "@/integrations/supabase/client"
 import { PKLCRUD, DeletePKLButton } from "@/components/PKLCRUD"
 import { CompanyCRUD, DeleteCompanyButton } from "@/components/CompanyCRUD"
+import { normalizeText } from "@/lib/utils"
 
 const DataPKL = () => {
   const [searchTerm, setSearchTerm] = useState("")
@@ -64,16 +65,17 @@ const DataPKL = () => {
     }
   }
 
+  const normalizedSearchTerm = normalizeText(searchTerm)
   const filteredPKLData = pklData.filter(item =>
-    item.students?.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.companies?.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.teachers?.nama.toLowerCase().includes(searchTerm.toLowerCase())
+    normalizeText(item.students?.nama).includes(normalizedSearchTerm) ||
+    normalizeText(item.companies?.nama).includes(normalizedSearchTerm) ||
+    normalizeText(item.teachers?.nama).includes(normalizedSearchTerm)
   )
 
   const filteredCompanies = companies.filter(company =>
-    company.nama.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    company.kategori?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    company.kecamatan?.toLowerCase().includes(searchTerm.toLowerCase())
+    normalizeText(company.nama).includes(normalizedSearchTerm) ||
+    normalizeText(company.kategori).includes(normalizedSearchTerm) ||
+    normalizeText(company.kecamatan).includes(normalizedSearchTerm)
   )
 
   return (

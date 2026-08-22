@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/integrations/supabase/client"
 import { Plus, Edit, Trash2 } from "lucide-react"
+import { getErrorMessage } from "@/lib/utils"
 
 interface PKLPlacement {
   id?: string
@@ -66,10 +67,13 @@ export const PKLCRUD = ({ onDataChange, editingPKL, onEditCancel }: PKLCRUDProps
         supabase.from('teachers').select('id, nama')
       ])
 
-      if (studentsData.data) setStudents(studentsData.data)
-      if (companiesData.data) setCompanies(companiesData.data)
-      if (periodsData.data) setPeriods(periodsData.data)
-      if (teachersData.data) setTeachers(teachersData.data)
+      const failedRequest = [studentsData, companiesData, periodsData, teachersData].find((result) => result.error)
+      if (failedRequest?.error) throw failedRequest.error
+
+      setStudents(studentsData.data || [])
+      setCompanies(companiesData.data || [])
+      setPeriods(periodsData.data || [])
+      setTeachers(teachersData.data || [])
     } catch (error) {
       console.error('Error fetching dropdown data:', error)
     }
@@ -77,6 +81,15 @@ export const PKLCRUD = ({ onDataChange, editingPKL, onEditCancel }: PKLCRUDProps
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.student_id || !formData.company_id || !formData.period_id) {
+      toast({
+        title: "Data belum lengkap",
+        description: "Siswa, perusahaan, dan periode wajib dipilih.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -112,10 +125,10 @@ export const PKLCRUD = ({ onDataChange, editingPKL, onEditCancel }: PKLCRUDProps
       })
       onDataChange()
       if (onEditCancel) onEditCancel()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menyimpan data PKL"),
         variant: "destructive"
       })
     } finally {
@@ -124,7 +137,13 @@ export const PKLCRUD = ({ onDataChange, editingPKL, onEditCancel }: PKLCRUDProps
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (!nextOpen && editingPKL) onEditCancel?.()
+      }}
+    >
       <DialogTrigger asChild>
         {!editingPKL && (
           <Button>
@@ -301,10 +320,10 @@ export const DeletePKLButton = ({ pklId, onDelete }: { pklId: string, onDelete: 
       if (error) throw error
       toast({ title: "Sukses", description: "Data PKL berhasil dihapus" })
       onDelete()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({ 
         title: "Error", 
-        description: error.message,
+        description: getErrorMessage(error, "Gagal menghapus data PKL"),
         variant: "destructive"
       })
     }
